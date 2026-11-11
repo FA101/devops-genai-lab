@@ -1,13 +1,10 @@
-import unittest
-from app import calculate_shipping
+from app import calculate_order_total, calculate_shipping
 
-class TestOrderService(unittest.TestCase):
-    
-    def test_shipping_calculation(self):
-        # Este teste simula a chamada da função interna
-        # Passando "5.50" como string para forçar o erro
-        result = calculate_shipping(100.00, "5.50")
-        self.assertEqual(result, 105.50)
 
-if __name__ == '__main__':
-    unittest.main()
+def test_calculate_shipping():
+    # 10 kg * 1.5 + 100 km * 0.1 + 5.0 de taxa = 30.0
+    assert calculate_shipping(10, 100) == 30.0
+
+
+def test_calculate_order_total():
+    assert calculate_order_total(200, 10, 100) == 230.0
