@@ -1,0 +1,34 @@
+image: python:3.9-slim
+
+stages:
+  - test
+  - genai_analysis
+
+variables:
+  # É necessário configurar OPENAI_API_KEY nas variáveis de CI/CD do projeto no GitLab
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+
+cache:
+  paths:
+    - .pip-cache/
+
+before_script:
+  - pip install -r requirements.txt
+
+# Estágio de Teste: Vai falhar propositalmente
+unit_test:
+  stage: test
+  script:
+    - echo "Rodando testes unitários..."
+    - pytest test_app.py
+  allow_failure: true # Permite que o pipeline continue para a análise mesmo falhando
+
+# Estágio da IA: Só roda se o teste falhar (ou se allow_failure for ativado e falhar)
+ai_debugger:
+  stage: genai_analysis
+  script:
+    - echo "Falha detectada. Iniciando agente de IA..."
+    - python genai_analyst.py
+  when: on_failure # Gatilho condicional crucial
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
