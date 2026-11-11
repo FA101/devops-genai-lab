@@ -8,7 +8,7 @@ import os
 
 # Taxa administrativa lida da configuração (variável de ambiente).
 # Atenção: variáveis de ambiente SEMPRE chegam como texto (str).
-ADMIN_FEE = float(os.getenv("ADMIN_FEE", "5.0"))
+ADMIN_FEE = os.getenv("ADMIN_FEE", "5.0")
 
 PRICE_PER_KG = 1.5
 PRICE_PER_KM = 0.1
