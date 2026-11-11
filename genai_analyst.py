@@ -27,7 +27,10 @@ PR_NUMBER = os.getenv("PR_NUMBER")               # vazio quando não é Pull Req
 TOKEN = os.getenv("GITHUB_TOKEN")
 
 LLM_URL = os.getenv("LLM_URL", "https://models.github.ai/inference/chat/completions")
-LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-4o-mini")
+# Lista de modelos (separados por vírgula): se um falhar, tenta o próximo.
+LLM_MODELS = [m.strip() for m in os.getenv(
+    "LLM_MODEL", "openai/gpt-4.1-mini,openai/gpt-4o-mini,openai/gpt-4o").split(",") if m.strip()]
+LLM_MODEL = LLM_MODELS[0]  # atualizado com o modelo que respondeu
 
 # Padrões de segredos que nunca devem ser enviados ao LLM nem publicados.
 SECRET_PATTERNS = [
@@ -102,22 +105,48 @@ def ask_llm(log: str, diff: str, code: str) -> str:
         f"<diff_do_pull_request>\n{diff}\n</diff_do_pull_request>\n\n"
         f"<codigo_relacionado>\n{code}\n</codigo_relacionado>"
     )
-    resp = requests.post(
-        LLM_URL,
-        headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
-        json={
-            "model": LLM_MODEL,
-            "temperature": 0.2,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": redact(user_prompt)},
-            ],
-        },
-        timeout=90,
-    )
-    if resp.status_code != 200:
-        raise RuntimeError(f"LLM respondeu HTTP {resp.status_code}: {resp.text[:500]}")
-    return resp.json()["choices"][0]["message"]["content"]
+    global LLM_MODEL
+    headers = {
+        "Authorization": f"Bearer {TOKEN}",
+        "Content-Type": "application/json",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    errors = []
+    for model in LLM_MODELS:
+        print(f"Consultando o LLM ({model}) via GitHub Models...")
+        try:
+            resp = requests.post(
+                LLM_URL,
+                headers=headers,
+                json={
+                    "model": model,
+                    "temperature": 0.2,
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": redact(user_prompt)},
+                    ],
+                },
+                timeout=90,
+            )
+            # Diagnóstico da própria chamada (útil quando algo dá errado).
+            print(f"  HTTP {resp.status_code} | Content-Type: {resp.headers.get('Content-Type')} "
+                  f"| {len(resp.content)} bytes")
+            if resp.status_code != 200:
+                raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:300]}")
+            try:
+                data = resp.json()
+            except ValueError:
+                raise RuntimeError(f"resposta não é JSON: {resp.text[:300]!r}")
+            content = data["choices"][0]["message"]["content"]
+            if not content:
+                raise RuntimeError("resposta sem conteúdo")
+            LLM_MODEL = model
+            return content
+        except (requests.RequestException, RuntimeError, KeyError, IndexError) as exc:
+            print(f"  Falhou com {model}: {exc}")
+            errors.append(f"{model}: {exc}")
+    raise RuntimeError("Nenhum modelo respondeu corretamente:\n" + "\n".join(errors))
 
 
 def post_pr_comment(body: str) -> None:
@@ -136,7 +165,6 @@ def main() -> int:
     diff = get_pr_diff()
     code = get_related_code(log)
 
-    print(f"Consultando o LLM ({LLM_MODEL}) via GitHub Models...")
     analysis = redact(ask_llm(log, diff, code))
 
     run_url = (f"{os.getenv('GITHUB_SERVER_URL', 'https://github.com')}/{REPO}"
