@@ -60,5 +60,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          LLM_MODEL: openai/gpt-4o-mini
+          LLM_MODEL: openai/gpt-4.1-mini,openai/gpt-4o-mini,openai/gpt-4o
         run: python genai_analyst.py
