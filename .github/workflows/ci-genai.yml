@@ -1,34 +1,64 @@
-image: python:3.9-slim
+# Pipeline do Projeto Integrador (Unidade 5) adaptado para GitHub Actions.
+# Equivalências: .gitlab-ci.yml -> este arquivo | Merge Request -> Pull Request
+#                when: on_failure -> if: failure() | CI/CD Variables -> GITHUB_TOKEN
 
-stages:
-  - test
-  - genai_analysis
+name: CI + GenAI
 
-variables:
-  # É necessário configurar OPENAI_API_KEY nas variáveis de CI/CD do projeto no GitLab
-  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-cache:
-  paths:
-    - .pip-cache/
+# O GITHUB_TOKEN automático recebe só o necessário:
+permissions:
+  contents: read        # ler o código
+  pull-requests: write  # comentar no Pull Request
+  issues: write         # (comentários de PR usam a API de issues)
+  models: read          # chamar o LLM no GitHub Models (gratuito)
 
-before_script:
-  - pip install -r requirements.txt
+jobs:
+  unit_test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Executar testes
+        run: |
+          set +e
+          python -m pytest -v --tb=short > test_output.log 2>&1
+          STATUS=$?
+          cat test_output.log
+          exit $STATUS
+      - name: Guardar log dos testes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log
+          path: test_output.log
 
-# Estágio de Teste: Vai falhar propositalmente
-unit_test:
-  stage: test
-  script:
-    - echo "Rodando testes unitários..."
-    - pytest test_app.py
-  allow_failure: true # Permite que o pipeline continue para a análise mesmo falhando
-
-# Estágio da IA: Só roda se o teste falhar (ou se allow_failure for ativado e falhar)
-ai_debugger:
-  stage: genai_analysis
-  script:
-    - echo "Falha detectada. Iniciando agente de IA..."
-    - python genai_analyst.py
-  when: on_failure # Gatilho condicional crucial
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  ai_debugger:
+    needs: unit_test
+    if: failure()          # só roda quando os testes falham
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Baixar log dos testes
+        uses: actions/download-artifact@v4
+        with:
+          name: test-log
+      - name: Instalar dependências
+        run: pip install requests
+      - name: Diagnóstico com IA generativa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          LLM_MODEL: openai/gpt-4o-mini
+        run: python genai_analyst.py
